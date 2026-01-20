@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Payment Flow Test (Plain)</title>
+    <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
+</head>
+<body>
+    <h1>Payment Flow Test (Plain)</h1>
+
+    <h2>Quick Actions</h2>
+    <button onclick="runCompleteFlow()">Run Complete Flow</button>
+    <button onclick="clearAllData()">Clear All</button>
+    <button onclick="showCurrentData()">Show Data (console)</button>
+
+    <hr />
+
+    <h2>1. Create Product</h2>
+    <label>Product Name <input id="productName" value="iPhone 15 Pro" /></label><br />
+    <label>Price (₹) <input id="productPrice" type="number" value="80000" /></label><br />
+    <label>Description <input id="productDescription" value="Latest flagship model" /></label><br />
+    <label>Stock <input id="productStock" type="number" value="5" /></label><br />
+    <button onclick="createProduct()">Create Product</button>
+    <pre id="productOutput" style="display:none;"></pre>
+
+    <hr />
+
+    <h2>2. Add to Cart</h2>
+    <label>User ID <input id="userId" value="user_002" /></label><br />
+    <label>Product ID <input id="productId" value="prod_002" /></label><br />
+    <label>Quantity <input id="quantity" type="number" value="1" min="1" /></label><br />
+    <button onclick="addToCart()">Add to Cart</button>
+    <button onclick="getCart()">View Cart</button>
+    <pre id="cartOutput" style="display:none;"></pre>
+
+    <hr />
+
+    <h2>3. Create Order</h2>
+    <label>User ID <input id="orderUserId" value="user_002" /></label><br />
+    <button onclick="createOrder()">Create Order</button>
+    <pre id="orderOutput" style="display:none;"></pre>
+    <p><strong>Save the Order ID for payment.</strong></p>
+
+    <hr />
+
+    <h2>4. Create Payment</h2>
+    <label>Order ID <input id="paymentOrderId" readonly placeholder="Auto-filled from order" /></label><br />
+    <label>Amount (₹) <input id="paymentAmount" type="number" value="80000" /></label><br />
+    <button onclick="createPayment()">Create Payment</button>
+    <pre id="paymentOutput" style="display:none;"></pre>
+
+    <hr />
+
+    <h2>5. Razorpay Checkout</h2>
+    <p>Test card: 4111 1111 1111 1111, any future date, any 3-digit CVV.</p>
+    <button onclick="openRazorpayCheckout()">Open Razorpay Checkout</button>
+    <pre id="razorpayOutput" style="display:none;"></pre>
+
+    <hr />
+
+    <h2>6. Simulate Webhook</h2>
+    <label>Order ID <input id="webhookOrderId" placeholder="Auto-filled from order" /></label><br />
+    <label>Amount (₹) <input id="webhookAmount" type="number" value="80000" /></label><br />
+    <button onclick="triggerWebhookSuccess()">Webhook Success</button>
+    <button onclick="triggerWebhookFailure()">Webhook Failure</button>
+    <button onclick="triggerInvalidSignature()">Invalid Signature</button>
+    <pre id="webhookOutput" style="display:none;"></pre>
+
+    <hr />
+
+    <h2>Current Session Data</h2>
+    <pre id="statusDisplay"></pre>
+
+    <script>
+        // API Base URL
+        const API_BASE = 'http://localhost:8080/api';
+        const RAZORPAY_KEY_ID = 'rzp_test_S66IWhzZpYZWQ3'; // matches application.properties
+        const RAZORPAY_SECRET = 'PGNLL4gFW3WzGHSmiPTtvi3L';
+
+        // Session data
+        const session = {
+            product: null,
+            cart: null,
+            order: null,
+            payment: null
+        };
+
+        // Utility Functions
+        function log(message, type = 'info') {
+            console.log(`[${type.toUpperCase()}] ${message}`);
+        }
+
+        function showOutput(elementId, data) {
+            const element = document.getElementById(elementId);
+            element.style.display = 'block';
+            element.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : data;
+        }
+
+        function updateStatus() {
+            const statusDisplay = document.getElementById('statusDisplay');
+            const text = [
+                `Product: ${session.product ? 'Created' : 'Not created'}`,
+                `Cart: ${session.cart ? 'Added' : 'Not added'}`,
+                `Order: ${session.order ? session.order.id : 'Not created'}`,
+                `Payment: ${session.payment ? session.payment.id : 'Not created'}`
+            ].join('\n');
+            statusDisplay.textContent = text;
+        }
+
+        // Step 1: Create Product
+        async function createProduct() {
+            try {
+                const productData = {
+                    name: document.getElementById('productName').value,
+                    description: document.getElementById('productDescription').value,
+                    price: parseFloat(document.getElementById('productPrice').value),
+                    stock: parseInt(document.getElementById('productStock').value)
+                };
+
+                const response = await fetch(`${API_BASE}/products`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(productData)
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const product = await response.json();
+                
+                session.product = product;
+                // Auto-fill product ID in next step
+                document.getElementById('productId').value = product.id || 'prod_002';
+                
+                showOutput('productOutput', product, true);
+                updateStatus();
+                log('Product created successfully', 'success');
+            } catch (error) {
+                showOutput('productOutput', `Error: ${error.message}`, false);
+                log(`Failed to create product: ${error.message}`, 'error');
+            }
+        }
+
+        // Step 2: Add to Cart
+        async function addToCart() {
+            try {
+                const userId = document.getElementById('userId').value;
+                const productId = document.getElementById('productId').value;
+                const quantity = document.getElementById('quantity').value;
+
+                const response = await fetch(
+                    `${API_BASE}/cart/add?userId=${userId}&productId=${productId}&quantity=${quantity}`,
+                    { method: 'POST' }
+                );
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const cart = await response.json();
+                
+                session.cart = cart;
+                showOutput('cartOutput', cart, true);
+                updateStatus();
+                log('Item added to cart', 'success');
+            } catch (error) {
+                showOutput('cartOutput', `Error: ${error.message}`, false);
+                log(`Failed to add to cart: ${error.message}`, 'error');
+            }
+        }
+
+        // Get Cart
+        async function getCart() {
+            try {
+                const userId = document.getElementById('userId').value;
+                const response = await fetch(`${API_BASE}/cart/${userId}`);
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const cart = await response.json();
+                
+                showOutput('cartOutput', cart, true);
+                log('Cart retrieved', 'success');
+            } catch (error) {
+                showOutput('cartOutput', `Error: ${error.message}`, false);
+                log(`Failed to get cart: ${error.message}`, 'error');
+            }
+        }
+
+        // Step 3: Create Order
+        async function createOrder() {
+            try {
+                const userId = document.getElementById('orderUserId').value;
+                const response = await fetch(`${API_BASE}/orders?userId=${userId}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const order = await response.json();
+                
+                session.order = order;
+                // Auto-fill order ID in payment and webhook steps
+                document.getElementById('paymentOrderId').value = order.id;
+                document.getElementById('webhookOrderId').value = order.id;
+                
+                showOutput('orderOutput', order, true);
+                updateStatus();
+                log('Order created successfully', 'success');
+            } catch (error) {
+                showOutput('orderOutput', `Error: ${error.message}`, false);
+                log(`Failed to create order: ${error.message}`, 'error');
+            }
+        }
+
+        // Step 4: Create Payment
+        async function createPayment() {
+            try {
+                const orderId = document.getElementById('paymentOrderId').value;
+                const amount = document.getElementById('paymentAmount').value;
+
+                if (!orderId) {
+                    throw new Error('Order ID not found. Create an order first.');
+                }
+
+                const response = await fetch(
+                    `${API_BASE}/payments/create?orderId=${orderId}&amount=${amount}`,
+                    { method: 'POST' }
+                );
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const payment = await response.json();
+                
+                session.payment = payment;
+                showOutput('paymentOutput', payment, true);
+                updateStatus();
+                log('Payment created successfully', 'success');
+            } catch (error) {
+                showOutput('paymentOutput', `Error: ${error.message}`, false);
+                log(`Failed to create payment: ${error.message}`, 'error');
+            }
+        }
+
+        // Step 5: Razorpay Checkout
+        async function openRazorpayCheckout() {
+            try {
+                if (!session.payment) {
+                    throw new Error('Payment not created. Create payment first.');
+                }
+
+                const orderId = session.order.id;
+                const amount = parseInt(document.getElementById('paymentAmount').value);
+
+                const options = {
+                    key: RAZORPAY_KEY_ID,
+                    amount: amount * 100, // Razorpay uses paise
+                    currency: 'INR',
+                    name: 'Demo Store',
+                    description: 'Payment for order ' + orderId,
+                    handler: async function (response) {
+                        log('Payment successful: ' + response.razorpay_payment_id, 'success');
+                        showOutput('razorpayOutput', {
+                            status: 'SUCCESS',
+                            paymentId: response.razorpay_payment_id,
+                            message: 'Payment completed! Webhook will be triggered automatically.'
+                        }, true);
+                        
+                        // Trigger webhook automatically
+                        setTimeout(() => {
+                            triggerWebhookSuccess();
+                        }, 1000);
+                    },
+                    prefill: {
+                        name: 'Test User',
+                        email: 'test@example.com',
+                        contact: '9876543210'
+                    },
+                    theme: {
+                        color: '#667eea'
+                    }
+                };
+
+                const checkout = new Razorpay(options);
+                checkout.open();
+            } catch (error) {
+                showOutput('razorpayOutput', `Error: ${error.message}`, false);
+                log(`Failed to open Razorpay: ${error.message}`, 'error');
+            }
+        }
+
+        // Step 6: Webhook Functions
+        async function triggerWebhookSuccess() {
+            try {
+                const orderId = document.getElementById('webhookOrderId').value;
+                const amount = parseInt(document.getElementById('webhookAmount').value);
+
+                if (!orderId) {
+                    throw new Error('Order ID not found.');
+                }
+
+                const payload = {
+                    event: 'payment.captured',
+                    payload: {
+                        payment: {
+                            entity: {
+                                id: 'pay_' + Math.random().toString(36).substr(2, 9),
+                                status: 'captured',
+                                amount: amount,
+                                receipt: orderId
+                            }
+                        }
+                    }
+                };
+
+                const signature = await generateSignature(JSON.stringify(payload), RAZORPAY_SECRET);
+
+                const response = await fetch(`${API_BASE}/webhooks/razorpay/payment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Razorpay-Signature': signature
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const text = await response.text();
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${text}`);
+
+                showOutput('webhookOutput', { status: 'SUCCESS', message: text }, true);
+                log('Webhook success triggered', 'success');
+            } catch (error) {
+                showOutput('webhookOutput', `Error: ${error.message}`, false);
+                log(`Webhook failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function triggerWebhookFailure() {
+            try {
+                const orderId = document.getElementById('webhookOrderId').value;
+                const amount = parseInt(document.getElementById('webhookAmount').value);
+
+                if (!orderId) {
+                    throw new Error('Order ID not found.');
+                }
+
+                const payload = {
+                    event: 'payment.failed',
+                    payload: {
+                        payment: {
+                            entity: {
+                                id: 'pay_fail_' + Math.random().toString(36).substr(2, 9),
+                                status: 'failed',
+                                amount: amount,
+                                receipt: orderId,
+                                error_code: 'BAD_REQUEST_ERROR',
+                                error_description: 'Card declined'
+                            }
+                        }
+                    }
+                };
+
+                const signature = await generateSignature(JSON.stringify(payload), RAZORPAY_SECRET);
+
+                const response = await fetch(`${API_BASE}/webhooks/razorpay/payment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Razorpay-Signature': signature
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const text = await response.text();
+                if (!response.ok) throw new Error(`HTTP ${response.status}: ${text}`);
+
+                showOutput('webhookOutput', { status: 'FAILED', message: text }, true);
+                log('Webhook failure triggered', 'success');
+            } catch (error) {
+                showOutput('webhookOutput', `Error: ${error.message}`, false);
+                log(`Webhook failed: ${error.message}`, 'error');
+            }
+        }
+
+        async function triggerInvalidSignature() {
+            try {
+                const orderId = document.getElementById('webhookOrderId').value;
+                const amount = parseInt(document.getElementById('webhookAmount').value);
+
+                const payload = {
+                    event: 'payment.captured',
+                    payload: {
+                        payment: {
+                            entity: {
+                                id: 'pay_invalid_' + Math.random().toString(36).substr(2, 9),
+                                status: 'captured',
+                                amount: amount,
+                                receipt: orderId
+                            }
+                        }
+                    }
+                };
+
+                const response = await fetch(`${API_BASE}/webhooks/razorpay/payment`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Razorpay-Signature': 'invalid_signature_xyz'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.status === 401) {
+                    showOutput('webhookOutput', '❌ Invalid signature rejected (HTTP 401)', false);
+                    log('Invalid signature correctly rejected', 'success');
+                } else {
+                    throw new Error('Expected 401 status for invalid signature');
+                }
+            } catch (error) {
+                showOutput('webhookOutput', `Error: ${error.message}`, false);
+                log(`Signature test failed: ${error.message}`, 'error');
+            }
+        }
+
+        // Utility: Generate Signature
+        async function generateSignature(payload, secret) {
+            // Generate base64 HMAC-SHA256 signature compatible with Razorpay webhook verification
+            const encoder = new TextEncoder();
+            const key = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(secret),
+                { name: 'HMAC', hash: 'SHA-256' },
+                false,
+                ['sign']
+            );
+
+            const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(payload));
+            const bytes = new Uint8Array(signature);
+            let binary = '';
+            bytes.forEach(b => { binary += String.fromCharCode(b); });
+            return btoa(binary);
+        }
+
+        // Quick Actions
+        async function runCompleteFlow() {
+            alert('Starting complete flow...\n\n1. Creating product\n2. Adding to cart\n3. Creating order\n4. Creating payment\n\nCheck console for details.');
+            
+            await createProduct();
+            await new Promise(r => setTimeout(r, 500));
+            
+            await addToCart();
+            await new Promise(r => setTimeout(r, 500));
+            
+            await createOrder();
+            await new Promise(r => setTimeout(r, 500));
+            
+            await createPayment();
+            await new Promise(r => setTimeout(r, 500));
+            
+            alert('✅ Flow completed!\n\nNext: Click "Open Razorpay Checkout" to test payment');
+        }
+
+        function clearAllData() {
+            session.product = null;
+            session.cart = null;
+            session.order = null;
+            session.payment = null;
+            
+            document.getElementById('paymentOrderId').value = '';
+            document.getElementById('webhookOrderId').value = '';
+            
+            ['productOutput','cartOutput','orderOutput','paymentOutput','razorpayOutput','webhookOutput'].forEach(id => {
+                const el = document.getElementById(id);
+                el.style.display = 'none';
+                el.textContent = '';
+            });
+            
+            updateStatus();
+            alert('All data cleared!');
+        }
+
+        function showCurrentData() {
+            console.log('Current Session Data:', session);
+            alert('Session data logged to console. Press F12 to view.');
+        }
+
+        // Initialize
+        updateStatus();
+    </script>
+</body>
+</html>
